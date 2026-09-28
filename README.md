@@ -6,7 +6,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/pixelpainter/comfyui-mute-bypass-by-ID?style=social)](https://github.com/pixelpainter/comfyui-mute-bypass-by-ID/stargazers)
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-%E2%98%95-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/pixelpainter)
 
-**Mute or bypass any node in your workflow by its node ID or Name** — even nodes buried inside nested Subgraphs — from a single compact control node. The node toggles, and target pickers, are standard ComfyUI widgets, so they can be **linked or promoted to Subgraph nodes** and used as top-level switches.
+**Mute or bypass any node in your workflow by its node ID or Name** — even nodes buried inside nested Subgraphs — from a single compact control node. Pick **ALL NODES** inside a Subgraph to control its contents at once, or pick a **GROUP** to control every node inside a canvas group. The node toggles, and target pickers, are standard ComfyUI widgets, so they can be **linked or promoted to Subgraph nodes** and used as top-level switches.
 
 This pack includes **5 custom nodes**:
 
@@ -39,7 +39,7 @@ Mute or bypass up to 20 nodes anywhere in your workflow with one switch.
 **Step by step:**
 
 1. Add the node: right-click the canvas → *Add Node* → *mute bypass by ID* → **Mute Bypass by ID — Single**.
-2. Click the **target** pill to open the picker. Search by node **name or ID**, or browse the groups — every Subgraph gets its own group, nested ones included.
+2. Click the **target** pill to open the picker. Search by node **name or ID**, or browse the sections — every Subgraph gets its own section, nested ones included. Inside a Subgraph section, choose the blue **ALL NODES** entry to control all its contents. Choose a purple **GROUP** entry to control the nodes inside that canvas group.
 
 <img src="assets/picker.png" alt="Target picker" width="700"/>
 
@@ -121,7 +121,7 @@ Same as the A/B node, but switches 2 fixed pairs at once. Kept only for old work
 * **Toggle save/preview branches** — mute your SaveImage / preview nodes while iterating, re-enable them for final output.
 * **Control Subgraph internals from the top level** — target nodes nested deep inside Subgraphs by their ID chain, and promote the picker and toggles onto the Subgraph node itself so the whole thing behaves like a packaged switch.
 * **One master panel** — with a Stacker (and promoted global toggles) you can bypass every optional branch in a big workflow for a fast test render, then restore everything to its exact previous state with one click.
-* **Group toggling** — a single growable node with up to 20 targets can mute an entire "debug" set (notes, previews, comparisons) in one shot; multiple Stackers keep different groups organized.
+* **Group toggling** — pick a purple **GROUP** or blue **ALL NODES** Subgraph entry as one target to mute or bypass all of its nodes together; multiple Stackers keep different groups organized.
 
 ---
 

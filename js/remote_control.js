@@ -48,7 +48,13 @@ const REMOTE_CSS = `
 }
 .remote-picker-item:hover { background: #2a3a4a; }
 .remote-picker-item.selected { background: #2a4a6a; }
-.remote-item-title { color: #ccc; font-size: 13px; }
+.remote-picker-item.group-target { border-left: 3px solid #b58bd7; padding-left: 22px; }
+.remote-picker-item.subgraph-target { border-left: 3px solid #66afef; padding-left: 22px; background: #17212a; }
+.remote-picker-item.subgraph-target:hover { background: #203344; }
+.remote-item-title { color: #ddd; font-size: 13px; display: flex; align-items: center; gap: 8px; }
+.remote-item-badge { border-radius: 3px; padding: 2px 5px; font-size: 10px; font-weight: 700; letter-spacing: .04em; }
+.remote-item-badge.group { color: #e1cafa; background: #443456; }
+.remote-item-badge.subgraph { color: #c7e5ff; background: #284b65; }
 .remote-item-meta { font-size: 11px; color: #555; font-family: monospace; }
 .remote-picker-list::-webkit-scrollbar { width: 8px; }
 .remote-picker-list::-webkit-scrollbar-track { background: #111; }
@@ -346,6 +352,57 @@ function _rcResolveTargetWidget(node, w) {
     return target;
 }
 
+// Group targets use a graph-chain plus the group's current index. LiteGraph
+// groups do not have stable IDs, so keep their title in the UI and resolve the
+// index against the owning graph each time the control is applied.
+function _rcGroupKey(chain, group, index, groups) {
+    const title = String(group.title || `Group ${index + 1}`);
+    const occurrence = groups.slice(0, index).filter(g => String(g.title || `Group ${groups.indexOf(g) + 1}`) === title).length;
+    return `group:${chain.length ? chain.join(":") : "root"}#${encodeURIComponent(title)}#${occurrence}`;
+}
+
+function _rcResolveGroup(key) {
+    if (!key || !String(key).startsWith("group:")) return null;
+    const split = String(key).slice(6).split("#");
+    if (split.length !== 3) return null;
+    const chain = split[0] === "root" ? [] : split[0].split(":").map(Number);
+    let title;
+    try { title = decodeURIComponent(split[1]); } catch (e) { return null; }
+    const occurrence = Number(split[2]);
+    if (!Number.isInteger(occurrence) || occurrence < 0 || chain.some(Number.isNaN)) return null;
+    let graph = _rcRootGraph();
+    for (const id of chain) {
+        const owner = _rcGetNode(graph, id);
+        graph = _rcGetInnerGraph(owner);
+        if (!graph) return null;
+    }
+    const groups = (graph && (graph._groups || graph.groups)) || [];
+    const group = groups.filter((g, i) => String(g.title || `Group ${i + 1}`) === title)[occurrence];
+    if (!group) return null;
+    let members = Array.isArray(group._nodes) ? group._nodes.map(n => typeof n === "object" ? n : _rcGetNode(graph, n)).filter(Boolean) : [];
+    if (!members.length) {
+        const bounds = group._bounding || [group.pos && group.pos[0], group.pos && group.pos[1], group.size && group.size[0], group.size && group.size[1]];
+        if (bounds && bounds.length >= 4 && bounds.every(Number.isFinite)) {
+            const [x, y, w, h] = bounds;
+            members = (graph._nodes || graph.nodes || []).filter(n => n && n.pos && n.pos[0] + (n.size?.[0] || 0) / 2 >= x && n.pos[0] + (n.size?.[0] || 0) / 2 <= x + w && n.pos[1] + (n.size?.[1] || 0) / 2 >= y && n.pos[1] + (n.size?.[1] || 0) / 2 <= y + h);
+        }
+    }
+    return { group, members };
+}
+
+function _rcGroupNodes(key) {
+    const resolved = _rcResolveGroup(key);
+    return resolved ? resolved.members : null;
+}
+
+function _rcCollectNodeTree(node, out = []) {
+    if (!node || out.includes(node)) return out;
+    out.push(node);
+    const inner = _rcGetInnerGraph(node);
+    if (inner) for (const child of (inner._nodes || inner.nodes || [])) _rcCollectNodeTree(child, out);
+    return out;
+}
+
 function _rcTraverseGlobal(graph, chain, pathLabel, outList) {
     if (!graph) return;
     const nodes = graph._nodes || graph.nodes || [];
@@ -360,14 +417,20 @@ function _rcTraverseGlobal(graph, chain, pathLabel, outList) {
         const t = (n.type || "").toLowerCase();
         const ignore = t === "primitive" || t === "reroute" || t.includes("note") || t.startsWith("set") || t.startsWith("get");
         
-        if (!inner && !ignore) {
-            outList.push({ node: n, title: title, path: pathLabel, key: uniqueKey });
+        if (!ignore && !inner) {
+            outList.push({ node: n, title, path: pathLabel, key: uniqueKey });
         }
         if (inner) {
             const nextPath = (pathLabel === "Root") ? title : `${pathLabel} > ${title}`;
+            outList.push({ node: n, title: `All nodes in ${title}`, path: nextPath, key: uniqueKey, isSubgraph: true, isSubgraphContents: true });
             _rcTraverseGlobal(inner, myChain, nextPath, outList);
         }
     }
+    const groups = graph._groups || graph.groups || [];
+    groups.forEach((group, index) => {
+        const groupTitle = group.title || `Group ${index + 1}`;
+        outList.push({ group, title: `${groupTitle} (group)`, path: pathLabel, key: _rcGroupKey(chain, group, index, groups), isGroup: true });
+    });
 }
 
 // Escape user-controlled strings (node titles, subgraph names) before they are
@@ -382,7 +445,7 @@ function _rcShowPickerModal(currentVal, onSelect) {
     try { if (window._rcPickerClosingUntil && performance.now() < window._rcPickerClosingUntil) return; } catch(e) {}
 
     const entries = [];
-    _rcTraverseGlobal(app.graph, [], "Root", entries);
+    _rcTraverseGlobal(_rcRootGraph(), [], "Root", entries);
     
     const groups = {};
     for (const e of entries) {
@@ -409,7 +472,7 @@ function _rcShowPickerModal(currentVal, onSelect) {
         list.innerHTML = "";
         const term = search.value.toLowerCase().trim();
         if (term) {
-            const hits = entries.filter(e => e.title.toLowerCase().includes(term) || String(e.node.id).includes(term));
+            const hits = entries.filter(e => e.title.toLowerCase().includes(term) || (e.node && String(e.node.id).includes(term)) || (e.isGroup && "group".includes(term)) || (e.isSubgraphContents && "subgraph all nodes".includes(term)));
             if (hits.length === 0) list.innerHTML = `<div style="padding:20px;text-align:center;color:#666">No results</div>`;
             else hits.forEach(e => addItem(e, list));
             return;
@@ -421,16 +484,19 @@ function _rcShowPickerModal(currentVal, onSelect) {
             grp.onclick = () => { activeGroup = (activeGroup===p ? null : p); render(); };
             const content = document.createElement("div"); content.className = "remote-group-content";
             if (p === activeGroup) content.classList.add("open");
-            groups[p].sort((a,b)=>a.title.localeCompare(b.title));
+            groups[p].sort((a,b)=>Number(!!b.isSubgraphContents)-Number(!!a.isSubgraphContents) || a.title.localeCompare(b.title));
             groups[p].forEach(e => addItem(e, content));
             list.appendChild(grp); list.appendChild(content);
         }
     };
 
     const addItem = (entry, parent) => {
-        const item = document.createElement("div"); item.className = "remote-picker-item";
+        const item = document.createElement("div");
+        item.className = "remote-picker-item" + (entry.isGroup ? " group-target" : "") + (entry.isSubgraphContents ? " subgraph-target" : "");
         if (entry.key === currentVal) item.classList.add("selected");
-        item.innerHTML = `<div class="remote-item-title">${_rcEsc(entry.title)}</div><div class="remote-item-meta">[${_rcEsc(entry.key)}] · ${_rcEsc(entry.node.type||entry.node.comfyClass||"")}</div>`;
+        const badge = entry.isGroup ? "GROUP" : entry.isSubgraphContents ? "ALL NODES" : "";
+        const kind = entry.isGroup ? "CANVAS GROUP" : entry.isSubgraphContents ? "SUBGRAPH CONTENTS" : (entry.node.type || entry.node.comfyClass || "");
+        item.innerHTML = `<div class="remote-item-title">${badge ? `<span class="remote-item-badge ${entry.isGroup ? "group" : "subgraph"}">${badge}</span>` : ""}<span>${_rcEsc(entry.title)}</span></div><div class="remote-item-meta">[${_rcEsc(entry.key)}] · ${_rcEsc(kind)}</div>`;
         item.onclick = (e) => {
     e.preventDefault();
     if(e.stopImmediatePropagation) e.stopImmediatePropagation();
@@ -521,13 +587,25 @@ const _rcReplaceWithPicker = (node, widget) => {
         let valTxt = "None";
         ctx.fillStyle = "#555";
         if(this.value) {
-            const info = _rcKeyInfo(this.value);
-            if(info && info.found) {
-                valTxt = `${info.title} [${info.key}]`;
-                ctx.fillStyle = "#DDD";
+            if (String(this.value).startsWith("group:")) {
+                const resolved = _rcResolveGroup(this.value);
+                if (resolved) {
+                    const title = resolved.group.title || "Group";
+                    valTxt = `${title} · ${resolved.members.length} nodes`;
+                    ctx.fillStyle = "#d5b6f2";
+                } else {
+                    valTxt = "Missing group";
+                    ctx.fillStyle = "#c08080";
+                }
             } else {
-                valTxt = "Missing";
-                ctx.fillStyle = "#c08080";
+                const info = _rcKeyInfo(this.value);
+                if(info && info.found) {
+                    valTxt = `${info.title} [${info.key}]`;
+                    ctx.fillStyle = "#DDD";
+                } else {
+                    valTxt = "Missing";
+                    ctx.fillStyle = "#c08080";
+                }
             }
         }
         ctx.textAlign = "right";
@@ -961,6 +1039,14 @@ const _rcEnforceLogic = (node) => {
 
     for(const w of targets) {
         if(!w.value) continue;
+        const groupNodes = String(w.value).startsWith("group:") ? _rcGroupNodes(w.value) : null;
+        if (groupNodes) {
+            const mode = getMode(switchW.value);
+            for (const member of groupNodes.flatMap(n => _rcCollectNodeTree(n, []))) {
+                if (member.mode !== mode) { member.mode = mode; if (member.setDirtyCanvas) member.setDirtyCanvas(true, true); changed = true; }
+            }
+            continue;
+        }
         const target = _rcResolveTargetWidget(node, w);
         if(!target) continue;
         let active = false;
@@ -973,10 +1059,13 @@ const _rcEnforceLogic = (node) => {
             active = switchW.value;
         }
         const mode = getMode(active);
-        if(target.mode !== mode) {
-            target.mode = mode;
-            if(target.setDirtyCanvas) target.setDirtyCanvas(true, true);
-            changed = true;
+        const affected = _rcGetInnerGraph(target) ? _rcCollectNodeTree(target, []) : [target];
+        for (const member of affected) {
+            if(member.mode !== mode) {
+                member.mode = mode;
+                if(member.setDirtyCanvas) member.setDirtyCanvas(true, true);
+                changed = true;
+            }
         }
     }
     if(changed) app.canvas.setDirty(true, true);
