@@ -600,8 +600,14 @@ const _rcReplaceWithPicker = (node, widget) => {
             } else {
                 const info = _rcKeyInfo(this.value);
                 if(info && info.found) {
-                    valTxt = `${info.title} [${info.key}]`;
-                    ctx.fillStyle = "#DDD";
+                    const targetNode = _rcFindNodeGlobal(this.value);
+                    if (_rcGetInnerGraph(targetNode)) {
+                        valTxt = `ALL NODES · ${info.title} [${info.key}]`;
+                        ctx.fillStyle = "#9ed4ff";
+                    } else {
+                        valTxt = `${info.title} [${info.key}]`;
+                        ctx.fillStyle = "#DDD";
+                    }
                 } else {
                     valTxt = "Missing";
                     ctx.fillStyle = "#c08080";
